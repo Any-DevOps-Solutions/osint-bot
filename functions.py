@@ -1,6 +1,10 @@
+import os
 from googleapiclient.discovery import build
 import openai
-from config import OPENAI_API_KEY, YOUR_API_KEY as api_key, YOUR_SEARCH_ENGINE_ID as search_engine_id, DOMAINS as domains
+if os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
+    from bot_lambda.config import OPENAI_API_KEY, YOUR_API_KEY as api_key, YOUR_SEARCH_ENGINE_ID as search_engine_id, DOMAINS as domains
+else:
+    from config import OPENAI_API_KEY, YOUR_API_KEY as api_key, YOUR_SEARCH_ENGINE_ID as search_engine_id, DOMAINS as domains
 
 openai.api_key = OPENAI_API_KEY
 
@@ -103,16 +107,13 @@ def osint_process_result(processed_results):
 
 (Аналіз показує, що [компанія] активно шукає [посада] через публікації вакансій у [країнах].
 Ось посилання з доказами їх діяльності по залученню співробітників:
-[посилання]
+[посилання у mardown style]
 )
 
 Ось дані до аналізу
 
 {processed_results}
 
-Будь ласка, виведі результат у форматі markdownv2 для Telegram:
-[inline URL](http://www.example.com/)
-Any character like dot, coma, dash, in message must be escaped with the preceding character '\'.
 
 """
 
@@ -129,3 +130,4 @@ Any character like dot, coma, dash, in message must be escaped with the precedin
     )
 
     return response['choices'][0]['message']['content']
+

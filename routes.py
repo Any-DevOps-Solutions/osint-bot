@@ -1,10 +1,17 @@
+import os
 from aiogram import Router, Bot
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message
-from functions import fetch_and_filter_results, nice_process_results, process_results, osint_process_result
+if os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
+    from bot_lambda.functions import fetch_and_filter_results, nice_process_results, process_results, osint_process_result
+    from bot.config import WELCOME_MESSAGE
+else:
+    from functions import fetch_and_filter_results, nice_process_results, process_results, osint_process_result
+    from config import WELCOME_MESSAGE
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import asyncio
+
 
 router = Router()
 
@@ -16,14 +23,10 @@ state = {
     "debug": False
 }
 
-def load_welcome_message():
-    with open('welcom_message.txt', 'r', encoding='utf-8') as file:
-        return file.read()
 
 @router.message(CommandStart())
 async def command_start_handler(message: Message) -> None:
-    welcome_text = load_welcome_message()
-    await message.answer(welcome_text, parse_mode='MarkdownV2')
+    await message.answer(WELCOME_MESSAGE, parse_mode='MarkdownV2')
 
 @router.message(Command(commands=['parol']))
 async def parol_handler(message: Message, state: FSMContext) -> None:
@@ -41,7 +44,7 @@ async def parol_handler(message: Message, state: FSMContext) -> None:
             "Ла-ла-ла-ла-ла-ла-ла-ла, Ла-ла-ла-ла-ла-ла -ла-ла. Тепер ви будете отримувати розширену інформацію про джерело даних!"
         )
     else:
-        await message.answer("Неправильний пароль")
+        state_data["debug"] = False
 
 @router.message(Command(commands=['check']))
 async def check_handler(message: Message, state: FSMContext, bot: Bot) -> None:
@@ -91,11 +94,12 @@ async def process_check(message: Message, state: FSMContext, bot: Bot, company: 
         
         user_data = await state.get_data()
         if user_data.get("debug"):
+            await message.answer("Ще додатково...")
             typing_task = asyncio.create_task(repeat_typing(bot, message.chat.id))
             detailed_results = await asyncio.get_running_loop().run_in_executor(None, osint_process_result, process_results(filtered_results, company, job_title))
             typing_task.cancel()
             await typing_task  # Дождитесь завершения задачи после её отмены
-            await message.answer(detailed_results, parse_mode='MarkdownV2', disable_web_page_preview=True)
+            await message.answer(detailed_results, parse_mode="Markdown", disable_web_page_preview=True)
     except asyncio.CancelledError:
         # Если задача отправки уведомлений отменена, ничего не делаем
         pass

@@ -1,0 +1,5 @@
+aiogram==3.8
+google-api-python-client
+openai==0.28.0
+aiohttp  # Если используется aiohttp для асинхронного веб-сервера
+
