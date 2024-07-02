@@ -1,0 +1,170 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  CodeS3Bucket:
+    Type: String
+    Description: S3 bucket where the Lambda code is stored
+
+  LambdaZipFile:
+    Type: String
+    Description: The S3 key for the Lambda zip file
+
+  LayerZipFile:
+    Type: String
+    Description: The S3 key for the Lambda layer zip file
+
+  BotToken:
+    Type: String
+    Default: "default_bot_token"
+    Description: Token for the Telegram bot
+
+  WebServerHost:
+    Type: String
+    Default: "127.0.0.1"
+    Description: Host for the web server
+
+  WebhookPath:
+    Type: String
+    Default: "/webhook"
+    Description: Path for the webhook
+
+  WebhookSecret:
+    Type: String
+    Default: "my-secret"
+    Description: Secret for the webhook
+
+  YourApiKey:
+    Type: String
+    Default: "default_api_key"
+    Description: Your API key for the search service
+
+  YourSearchEngineId:
+    Type: String
+    Default: "default_search_engine_id"
+    Description: Your search engine ID
+
+  OpenAiApiKey:
+    Type: String
+    Default: "default_openai_api_key"
+    Description: Your OpenAI API key
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The ID of the VPC
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: The list of Subnet IDs in the VPC
+
+  SecurityGroupIds:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: The list of Security Group IDs
+
+Resources:
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  LambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: lambda_bot.main.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref CodeS3Bucket
+        S3Key: !Ref LambdaZipFile
+      Runtime: python3.12
+      Layers:
+        - !Ref LambdaLayer
+      VpcConfig:
+        SubnetIds: !Ref SubnetIds
+        SecurityGroupIds: !Ref SecurityGroupIds
+      Environment:
+        Variables:
+          BOT_TOKEN: !Ref BotToken
+          WEB_SERVER_HOST: !Ref WebServerHost
+          WEBHOOK_PATH: !Ref WebhookPath
+          WEBHOOK_SECRET: !Ref WebhookSecret
+          BASE_WEBHOOK_URL: !Sub https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod${WebhookPath}
+          YOUR_API_KEY: !Ref YourApiKey
+          YOUR_SEARCH_ENGINE_ID: !Ref YourSearchEngineId
+          OPENAI_API_KEY: !Ref OpenAiApiKey
+
+  LambdaLayer:
+    Type: 'AWS::Lambda::LayerVersion'
+    Properties:
+      Content:
+        S3Bucket: !Ref CodeS3Bucket
+        S3Key: !Ref LayerZipFile
+      CompatibleRuntimes:
+        - python3.12
+
+  ApiGateway:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Name: "WebhookApi"
+      Description: "API Gateway for webhook"
+      FailOnWarnings: true
+
+  ApiGatewayResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: !Select [1, !Split ["/", !Ref WebhookPath]]
+      RestApiId: !Ref ApiGateway
+
+  ApiGatewayMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      AuthorizationType: "NONE"
+      HttpMethod: "ANY"
+      ResourceId: !Ref ApiGatewayResource
+      RestApiId: !Ref ApiGateway
+      Integration:
+        IntegrationHttpMethod: "POST"
+        Type: "AWS_PROXY"
+        Uri: 
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFunction.Arn}/invocations
+
+  ApiGatewayDeployment:
+    Type: 'AWS::ApiGateway::Deployment'
+    Properties:
+      RestApiId: !Ref ApiGateway
+      StageName: "prod"
+    DependsOn: ApiGatewayMethod
+
+  LambdaInvokePermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref LambdaFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: 
+        Fn::Sub: arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*/ANY/${WebhookPath}
+
+Outputs:
+  LambdaFunctionName:
+    Description: Name of the Lambda function
+    Value: !Ref LambdaFunction
+
+  FullApiUrl:
+    Description: "Full API Gateway URL with webhook path"
+    Value: 
+      Fn::Sub: https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod${WebhookPath}
